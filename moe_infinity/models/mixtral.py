@@ -13,6 +13,38 @@ from transformers.models.mixtral.modeling_mixtral import (
 )
 
 from moe_infinity.utils import ArcherConfig
+'''
+config for mixtral
+{
+  "architectures": [
+    "MixtralForCausalLM"
+  ],
+  "attention_dropout": 0.0,
+  "bos_token_id": 1,
+  "eos_token_id": 2,
+  "hidden_act": "silu",
+  "hidden_size": 4096,
+  "initializer_range": 0.02,
+  "intermediate_size": 14336,
+  "max_position_embeddings": 32768,
+  "model_type": "mixtral",
+  "num_attention_heads": 32,
+  "num_experts_per_tok": 2,
+  "num_hidden_layers": 32,
+  "num_key_value_heads": 8,
+  "num_local_experts": 8,
+  "output_router_logits": false,
+  "rms_norm_eps": 1e-05,
+  "rope_theta": 1000000.0,
+  "router_aux_loss_coef": 0.02,
+  "sliding_window": 4096,
+  "tie_word_embeddings": false,
+  "torch_dtype": "bfloat16",
+  "transformers_version": "4.36.0.dev0",
+  "use_cache": true,
+  "vocab_size": 32000
+}
+'''
 
 
 class SyncMixtralSparseMoeBlock(nn.Module):
@@ -30,7 +62,8 @@ class SyncMixtralSparseMoeBlock(nn.Module):
         self.gate = nn.Linear(self.hidden_dim, self.num_experts, bias=False)
 
         self.experts = nn.ModuleList(
-            [MixtralBlockSparseTop2MLP(config) for _ in range(self.num_experts)]
+            [MixtralBlockSparseTop2MLP(config)
+             for _ in range(self.num_experts)]
         )
 
         self.archer_tracer = None
@@ -46,9 +79,12 @@ class SyncMixtralSparseMoeBlock(nn.Module):
         router_logits = self.gate(hidden_states)
 
         routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        # routing_weights: values ; selected_experts: indices
+        # self.top_k is 2 for mixtral
         routing_weights, selected_experts = torch.topk(
             routing_weights, self.top_k, dim=-1
         )
+        # normalize routing_weights
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
         # we cast back to the input dtype
         routing_weights = routing_weights.to(hidden_states.dtype)
